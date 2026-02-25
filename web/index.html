@@ -406,6 +406,7 @@
 
   .tab-pane { display: none; flex: 1; overflow-y: auto; padding: 10px; }
   .tab-pane.active { display: block; }
+  #pane-prompt.active { display: flex; flex-direction: column; gap: 8px; }
 
   /* Tools tab */
   .tool-card {
@@ -955,10 +956,6 @@ let promptDirty = false;
 
 function buildPromptPane(content) {
   const pane = document.getElementById('pane-prompt');
-  pane.style.display = 'flex';
-  pane.style.flexDirection = 'column';
-  pane.style.gap = '8px';
-  pane.style.padding = '10px';
   pane.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
       <span style="font-size:11px;color:var(--dim)">Primordial system prompt</span>
@@ -1192,7 +1189,10 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 
 // ── Keyboard shortcut ─────────────────────────────────────────────────────────
 document.getElementById('msg-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) sendMsg();
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMsg();
+  }
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────────

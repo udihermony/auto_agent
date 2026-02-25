@@ -380,11 +380,8 @@ async def resume(body: dict = {}):
 
 # ─── Entry ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import asyncio
-    # Windows: SelectorEventLoop responds to Ctrl+C; ProactorEventLoop (default) does not.
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     print("Agent web UI → http://localhost:8000")
     try:
         uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         print("\nServer stopped.")

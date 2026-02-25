@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent</title>
+<style>
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --border:   #30363d;
+    --text:     #c9d1d9;
+    --dim:      #8b949e;
+    --accent:   #58a6ff;
+    --green:    #3fb950;
+    --red:      #f85149;
+    --purple:   #d2a8ff;
+    --amber:    #e3b341;
+    --orange:   #d29922;
+    --violet:   #bc8cff;
+    --teal:     #56d364;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+    font-size: 13px;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 42px 1fr 52px;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  #header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  #phase-badge {
+    font-weight: 600;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+  .phase-idle       { background: #21262d; color: var(--dim); }
+  .phase-working    { background: #1f3a5f; color: var(--accent); }
+  .phase-reflecting { background: #1a3a1a; color: var(--teal); }
+  .phase-paused     { background: #3a2a00; color: var(--amber); }
+  .phase-starting   { background: #21262d; color: var(--dim); }
+
+  #task-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--dim);
+    font-size: 12px;
+  }
+  #task-label span { color: var(--text); }
+
+  #header-meta { color: var(--dim); font-size: 11px; white-space: nowrap; }
+
+  #pause-btn {
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  #pause-btn:hover { background: var(--border); }
+  #pause-btn.active { background: var(--orange); border-color: var(--orange); color: #000; }
+
+  /* ── Main layout ── */
+  #main {
+    display: grid;
+    grid-template-columns: 180px 1fr 280px;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar (sessions) ── */
+  #sidebar {
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #sidebar h3 {
+    padding: 10px 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--dim);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #live-btn {
+    margin: 8px;
+    padding: 5px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  #live-btn:hover { background: var(--border); }
+  #live-btn.viewing-live { color: var(--green); border-color: var(--green); }
+
+  #session-list {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .session-item {
+    padding: 7px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #1c2128;
+    transition: background 0.1s;
+  }
+  .session-item:hover  { background: #1c2128; }
+  .session-item.active { background: #1f2937; border-left: 2px solid var(--accent); }
+
+  .session-id   { font-size: 10px; color: var(--dim); }
+  .session-task { font-size: 11px; color: var(--text); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-done { font-size: 10px; margin-top: 2px; }
+  .session-done.ok  { color: var(--green); }
+  .session-done.wip { color: var(--amber); }
+
+  /* ── Stream panel ── */
+  #stream-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #stream-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  #stream-title { font-size: 11px; color: var(--dim); margin-right: 4px; }
+
+  .filter-btn {
+    padding: 2px 7px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: #21262d;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    color: var(--dim);
+    transition: all 0.15s;
+  }
+  .filter-btn.on  { color: #fff; border-color: currentColor; }
+
+  #follow-btn {
+    margin-left: auto;
+    padding: 3px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--dim);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  #follow-btn.on { color: var(--green); border-color: var(--green); }
+  #follow-btn:hover { background: var(--border); }
+
+  .toolbar-action-btn {
+    padding: 3px 9px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--dim);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .toolbar-action-btn:hover { background: var(--border); color: var(--text); }
+  .toolbar-action-btn.new-session-btn:hover { border-color: var(--amber); color: var(--amber); }
+
+  #stream {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 4px;
+  }
+
+  .ev {
+    display: flex;
+    gap: 8px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    transition: background 0.1s;
+    align-items: flex-start;
+    line-height: 1.5;
+  }
+  .ev:hover { background: #1c2128; }
+  .ev.hidden { display: none; }
+
+  .ev-ts   { color: var(--dim); font-size: 10px; white-space: nowrap; padding-top: 2px; min-width: 56px; }
+  .ev-type {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    white-space: nowrap;
+    min-width: 90px;
+    text-align: center;
+    font-weight: 600;
+    flex-shrink: 0;
+    padding-top: 2px;
+  }
+  .ev-content { flex: 1; word-break: break-word; color: var(--text); }
+  .ev-content pre { white-space: pre-wrap; font-family: inherit; }
+
+  /* Event type colours */
+  .t-thinking      { background: #21262d; color: var(--dim); }
+  .t-llm_call      { background: #161b22; color: #484f58; }
+  .t-exec          { background: #1f3a5f; color: var(--accent); }
+  .t-exec_result   { background: #1a3a1a; color: var(--teal); }
+  .t-exec_result.fail { background: #3a1a1a; color: var(--red); }
+  .t-tool_written  { background: #2d1f47; color: var(--purple); }
+  .t-tool_call     { background: #1a3038; color: #79c0ff; }
+  .t-memory_write  { background: #1a2e1a; color: var(--teal); }
+  .t-human_msg     { background: #3a2e00; color: var(--amber); }
+  .t-paused        { background: #3a2a00; color: var(--orange); }
+  .t-resumed       { background: #1a3a1a; color: var(--teal); }
+  .t-spawn_sub     { background: #2a1f3d; color: var(--violet); }
+  .t-collect_sub   { background: #2a1f3d; color: #a78bfa; }
+  .t-sub_done      { background: #1a2e1a; color: var(--teal); }
+  .t-reflecting    { background: #1a3028; color: #5de8b0; }
+  .t-reflect_done  { background: #1a3028; color: #5de8b0; }
+  .t-task_start    { background: #1f3a5f; color: #fff; font-weight: 600; }
+  .t-task_done     { background: #1a3a1a; color: var(--green); font-weight: 600; }
+  .t-agent_start   { background: #21262d; color: var(--text); }
+  .t-idle          { background: #161b22; color: #484f58; }
+  .t-error         { background: #3a1a1a; color: var(--red); }
+  .t-abort         { background: #3a1a1a; color: var(--red); font-weight: 600; }
+  .t-subagent_start { background: #2a1f3d; color: var(--violet); }
+  .t-subagent_done  { background: #1a2e1a; color: var(--teal); }
+  .t-default       { background: #21262d; color: var(--dim); }
+
+  /* ── Right panel ── */
+  #right-panel {
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .tab-btn {
+    flex: 1;
+    padding: 8px 4px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--dim);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    transition: all 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-pane { display: none; flex: 1; overflow-y: auto; padding: 10px; }
+  .tab-pane.active { display: block; }
+
+  /* Tools tab */
+  .tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+  }
+  .tool-name  { color: var(--accent); font-weight: 600; font-size: 12px; }
+  .tool-desc  { color: var(--dim); font-size: 11px; margin: 3px 0; }
+  .tool-meta  { display: flex; gap: 8px; align-items: center; margin-top: 5px; }
+  .score-bar  { flex: 1; height: 4px; background: var(--border); border-radius: 2px; }
+  .score-fill { height: 100%; border-radius: 2px; }
+  .tool-score-num { font-size: 10px; color: var(--dim); white-space: nowrap; }
+  .tool-note  { font-size: 10px; color: var(--amber); margin-top: 4px; }
+  .tag-deprecated { color: var(--red); font-size: 10px; }
+
+  /* Memory tab */
+  #memory-content {
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--dim);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #memory-content h3 { color: var(--text); margin-top: 8px; }
+
+  /* Agents tab */
+  .agent-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    cursor: pointer;
+  }
+  .agent-card:hover { border-color: var(--accent); }
+  .agent-id    { color: var(--violet); font-size: 11px; font-weight: 600; }
+  .agent-task  { color: var(--dim); font-size: 11px; margin-top: 2px; }
+  .agent-phase { font-size: 10px; margin-top: 4px; }
+  .agent-done  { color: var(--green); }
+  .agent-wip   { color: var(--amber); }
+
+  /* ── Input bar ── */
+  #input-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+
+  #input-mode {
+    font-size: 11px;
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  #input-mode.steer  { color: var(--amber); }
+  #input-mode.task   { color: var(--green); }
+
+  #msg-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  #msg-input:focus { border-color: var(--accent); }
+  #msg-input::placeholder { color: var(--dim); }
+
+  #send-btn, #abort-btn {
+    padding: 7px 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    transition: opacity 0.15s;
+  }
+  #send-btn  { background: var(--accent); color: #000; }
+  #abort-btn { background: var(--red); color: #fff; }
+  #send-btn:hover, #abort-btn:hover { opacity: 0.85; }
+  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header id="header">
+  <span id="phase-badge" class="phase-starting">starting</span>
+  <span id="task-label"><span id="task-text">—</span></span>
+  <span id="header-meta">sessions: <b id="session-count">0</b></span>
+  <button id="pause-btn" onclick="togglePause()">Pause</button>
+</header>
+
+<!-- Main -->
+<div id="main">
+
+  <!-- Sidebar: session history -->
+  <aside id="sidebar">
+    <h3>Sessions</h3>
+    <button id="live-btn" class="viewing-live" onclick="goLive()">● Live</button>
+    <div id="session-list"></div>
+  </aside>
+
+  <!-- Stream panel -->
+  <section id="stream-panel">
+    <div id="stream-toolbar">
+      <span id="stream-title">LIVE STREAM</span>
+      <button class="filter-btn on" data-type="thinking"      style="color:#8b949e"   onclick="toggleFilter(this)">thinking</button>
+      <button class="filter-btn on" data-type="exec"          style="color:#58a6ff"   onclick="toggleFilter(this)">exec</button>
+      <button class="filter-btn on" data-type="tool"          style="color:#d2a8ff"   onclick="toggleFilter(this)">tools</button>
+      <button class="filter-btn on" data-type="memory"        style="color:#3fb950"   onclick="toggleFilter(this)">memory</button>
+      <button class="filter-btn on" data-type="sub"           style="color:#bc8cff"   onclick="toggleFilter(this)">sub-agents</button>
+      <button class="filter-btn on" data-type="meta"          style="color:#56d364"   onclick="toggleFilter(this)">reflect/idle</button>
+      <button id="follow-btn" class="on" onclick="toggleFollow()">↓ Follow</button>
+      <button class="toolbar-action-btn" onclick="clearStream()" title="Clear the stream display">Clear</button>
+      <button class="toolbar-action-btn new-session-btn" onclick="newSession()" title="Abort current task and start fresh">New Session</button>
+    </div>
+    <div id="stream"></div>
+  </section>
+
+  <!-- Right panel: tools / memory / agents -->
+  <aside id="right-panel">
+    <div id="tabs">
+      <button class="tab-btn active" onclick="showTab('tools')">Tools</button>
+      <button class="tab-btn"        onclick="showTab('memory')">Memory</button>
+      <button class="tab-btn"        onclick="showTab('agents')">Agents</button>
+      <button class="tab-btn"        onclick="showTab('prompt')">Prompt</button>
+    </div>
+    <div id="pane-tools"  class="tab-pane active"><p style="color:var(--dim);padding:8px">No tools yet.</p></div>
+    <div id="pane-memory" class="tab-pane"><pre id="memory-content">No knowledge accumulated yet.</pre></div>
+    <div id="pane-agents" class="tab-pane"><p style="color:var(--dim);padding:8px">No sub-agents yet.</p></div>
+    <div id="pane-prompt" class="tab-pane"></div>
+  </aside>
+
+</div>
+
+<!-- Input bar -->
+<footer id="input-bar">
+  <span id="input-mode" class="task">Task:</span>
+  <input id="msg-input" type="text" placeholder="Enter a task for the agent…" autocomplete="off">
+  <button id="abort-btn" onclick="sendAbort()" title="Abort current task">Abort</button>
+  <button id="send-btn"  onclick="sendMsg()">Send</button>
+</footer>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let agentPhase   = 'idle';
+let isLive       = true;
+let followStream = true;
+let isPaused     = false;
+
+// Filter groups: maps filter button data-type to a set of event type strings
+const FILTER_GROUPS = {
+  thinking: ['thinking', 'llm_call'],
+  exec:     ['exec', 'exec_result'],
+  tool:     ['tool_written', 'tool_call', 'write_tool', 'use_tool'],
+  memory:   ['memory_write', 'remember'],
+  sub:      ['spawn_sub', 'collect_sub', 'sub_done', 'subagent_start', 'subagent_done'],
+  meta:     ['reflecting', 'reflect_done', 'reflect_error', 'idle', 'agent_start'],
+};
+const activeFilters = new Set(['thinking','exec','tool','memory','sub','meta']);
+
+// ── SSE ─────────────────────────────────────────────────────────────────────
+let sse = null;
+function connectSSE() {
+  if (sse) sse.close();
+  sse = new EventSource('/stream');
+  sse.onmessage = e => {
+    try { appendEvent(JSON.parse(e.data)); }
+    catch(_) {}
+  };
+  sse.onerror = () => setTimeout(connectSSE, 2000);
+}
+
+// ── Stream rendering ─────────────────────────────────────────────────────────
+const TYPE_CLASS = {
+  thinking:      't-thinking',
+  llm_call:      't-llm_call',
+  exec:          't-exec',
+  exec_result:   't-exec_result',
+  tool_written:  't-tool_written',
+  write_tool:    't-tool_written',
+  tool_call:     't-tool_call',
+  use_tool:      't-tool_call',
+  memory_write:  't-memory_write',
+  remember:      't-memory_write',
+  human_msg:     't-human_msg',
+  paused:        't-paused',
+  resumed:       't-resumed',
+  spawn_sub:     't-spawn_sub',
+  collect_sub:   't-collect_sub',
+  sub_done:      't-sub_done',
+  reflecting:    't-reflecting',
+  reflect_done:  't-reflect_done',
+  task_start:    't-task_start',
+  task_done:     't-task_done',
+  agent_start:   't-agent_start',
+  idle:          't-idle',
+  error:         't-error',
+  abort:         't-abort',
+  subagent_start:'t-subagent_start',
+  subagent_done: 't-subagent_done',
+};
+
+function filterGroup(type) {
+  for (const [group, types] of Object.entries(FILTER_GROUPS)) {
+    if (types.includes(type)) return group;
+  }
+  return null;
+}
+
+function isVisible(type) {
+  const group = filterGroup(type);
+  if (!group) return true; // always show unfiltered types (task_start, task_done, etc.)
+  return activeFilters.has(group);
+}
+
+function fmtTime(ts) {
+  try { return new Date(ts).toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+  catch(_) { return ''; }
+}
+
+function appendEvent(ev) {
+  if (!isLive) return;
+  const el = buildEventEl(ev);
+  const container = document.getElementById('stream');
+  container.appendChild(el);
+  if (container.children.length > 2000) container.removeChild(container.firstChild);
+  if (followStream) el.scrollIntoView({ block: 'end' });
+}
+
+function buildEventEl(ev) {
+  const div = document.createElement('div');
+  div.className = 'ev';
+  div.dataset.type = ev.type;
+
+  const typeClass = TYPE_CLASS[ev.type] || 't-default';
+  const extraClass = (ev.type === 'exec_result' && ev.content && ev.content.startsWith('exit=0')) ? '' :
+                     (ev.type === 'exec_result') ? 'fail' : '';
+  const hidden = !isVisible(ev.type) ? ' hidden' : '';
+  div.className = `ev${hidden}`;
+
+  div.innerHTML = `
+    <span class="ev-ts">${fmtTime(ev.ts)}</span>
+    <span class="ev-type ${typeClass} ${extraClass}">${ev.type}</span>
+    <span class="ev-content">${escHtml(ev.content || '')}</span>
+  `;
+  return div;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Filters ──────────────────────────────────────────────────────────────────
+function toggleFilter(btn) {
+  const group = btn.dataset.type;
+  if (activeFilters.has(group)) {
+    activeFilters.delete(group);
+    btn.classList.remove('on');
+  } else {
+    activeFilters.add(group);
+    btn.classList.add('on');
+  }
+  // Show/hide existing events
+  document.querySelectorAll('#stream .ev').forEach(el => {
+    el.classList.toggle('hidden', !isVisible(el.dataset.type));
+  });
+}
+
+// ── Follow toggle ────────────────────────────────────────────────────────────
+function clearStream() {
+  document.getElementById('stream').innerHTML = '';
+  document.getElementById('stream-title').textContent = 'LIVE STREAM';
+  isLive = true;
+  document.getElementById('live-btn').classList.add('viewing-live');
+  document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+}
+
+async function newSession() {
+  if (agentPhase !== 'idle') {
+    if (!confirm('This will abort the current task and clear the stream. Continue?')) return;
+    try {
+      await fetch('/abort', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ message: 'New session requested by user' })
+      });
+    } catch(_) {}
+    // Small delay to let the agent process the abort before clearing
+    await new Promise(r => setTimeout(r, 600));
+  }
+  clearStream();
+  // Reconnect SSE so we get a clean live stream
+  connectSSE();
+  document.getElementById('msg-input').focus();
+}
+
+function toggleFollow() {
+  followStream = !followStream;
+  const btn = document.getElementById('follow-btn');
+  btn.classList.toggle('on', followStream);
+  if (followStream) {
+    const last = document.querySelector('#stream .ev:last-child');
+    if (last) last.scrollIntoView({ block: 'end' });
+  }
+}
+
+document.getElementById('stream').addEventListener('scroll', function() {
+  const el = this;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  if (!atBottom && followStream) {
+    followStream = false;
+    document.getElementById('follow-btn').classList.remove('on');
+  }
+});
+
+// ── Live / session view ──────────────────────────────────────────────────────
+function goLive() {
+  isLive = true;
+  document.getElementById('stream').innerHTML = '';
+  document.getElementById('stream-title').textContent = 'LIVE STREAM';
+  document.getElementById('live-btn').classList.add('viewing-live');
+  document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+  // Reconnect SSE to get latest events
+  connectSSE();
+}
+
+async function viewSession(id, el) {
+  isLive = false;
+  if (sse) { sse.close(); sse = null; }
+  document.getElementById('stream').innerHTML = '';
+  document.getElementById('stream-title').textContent = `SESSION ${id}`;
+  document.getElementById('live-btn').classList.remove('viewing-live');
+  document.querySelectorAll('.session-item').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+
+  try {
+    const events = await (await fetch(`/sessions/${id}/stream`)).json();
+    events.forEach(ev => {
+      const div = buildEventEl(ev);
+      document.getElementById('stream').appendChild(div);
+    });
+    const last = document.querySelector('#stream .ev:last-child');
+    if (last) last.scrollIntoView({ block: 'end' });
+  } catch(e) {
+    document.getElementById('stream').innerHTML = '<p style="color:var(--dim);padding:16px">No stream data.</p>';
+  }
+}
+
+// ── Status polling ───────────────────────────────────────────────────────────
+async function pollState() {
+  try {
+    const s = await (await fetch('/state')).json();
+    updateHeader(s.status, s.paused);
+    renderTools(s.tools);
+    renderMemory(s.memory);
+    isPaused = s.paused;
+    document.getElementById('pause-btn').textContent = s.paused ? 'Resume' : 'Pause';
+    document.getElementById('pause-btn').classList.toggle('active', s.paused);
+  } catch(_) {}
+}
+
+async function pollSessions() {
+  try {
+    const sessions = await (await fetch('/sessions')).json();
+    renderSessions(sessions);
+  } catch(_) {}
+}
+
+async function pollAgents() {
+  try {
+    const agents = await (await fetch('/agents')).json();
+    renderAgents(agents);
+  } catch(_) {}
+}
+
+function updateHeader(status, paused) {
+  agentPhase = paused ? 'paused' : (status.phase || 'idle');
+  const badge = document.getElementById('phase-badge');
+  badge.textContent = agentPhase;
+  badge.className = `phase-${agentPhase}`;
+
+  document.getElementById('task-text').textContent = status.task || '—';
+  document.getElementById('session-count').textContent = status.sessions || '0';
+
+  // Adapt input bar
+  const mode = document.getElementById('input-mode');
+  const input = document.getElementById('msg-input');
+  if (agentPhase === 'idle') {
+    mode.textContent = 'Task:';
+    mode.className = 'task';
+    input.placeholder = 'Enter a task for the agent…';
+  } else {
+    mode.textContent = 'Steer:';
+    mode.className = 'steer';
+    input.placeholder = 'Send a steering message or instruction…';
+  }
+}
+
+// ── Render: tools ─────────────────────────────────────────────────────────────
+function renderTools(tools) {
+  const pane = document.getElementById('pane-tools');
+  if (!tools || Object.keys(tools).length === 0) {
+    pane.innerHTML = '<p style="color:var(--dim);padding:8px">No tools yet.</p>';
+    return;
+  }
+  const sorted = Object.entries(tools).sort((a, b) => (b[1].score || 0) - (a[1].score || 0));
+  pane.innerHTML = sorted.map(([name, info]) => {
+    const score    = info.score ?? 1.0;
+    const pct      = Math.round(score * 100);
+    const fillCol  = score > 0.7 ? 'var(--green)' : score > 0.4 ? 'var(--amber)' : 'var(--red)';
+    const depr     = info.status === 'deprecated' ? ' <span class="tag-deprecated">[deprecated]</span>' : '';
+    const note     = info.improvement_note ? `<div class="tool-note">⚠ ${escHtml(info.improvement_note)}</div>` : '';
+    const uses     = info.uses || 0;
+    const failures = info.failures || 0;
+    return `
+      <div class="tool-card">
+        <div class="tool-name">${escHtml(name)}${depr}</div>
+        <div class="tool-desc">${escHtml(info.description || '')}</div>
+        <div class="tool-meta">
+          <div class="score-bar"><div class="score-fill" style="width:${pct}%;background:${fillCol}"></div></div>
+          <span class="tool-score-num">${pct}% (${uses - failures}/${uses})</span>
+        </div>
+        ${note}
+      </div>`;
+  }).join('');
+}
+
+// ── Render: memory ────────────────────────────────────────────────────────────
+function renderMemory(text) {
+  const el = document.getElementById('memory-content');
+  el.textContent = text || 'No knowledge accumulated yet.';
+}
+
+// ── Render: sessions ──────────────────────────────────────────────────────────
+function renderSessions(sessions) {
+  const list = document.getElementById('session-list');
+  if (!sessions || sessions.length === 0) {
+    list.innerHTML = '<p style="color:var(--dim);font-size:11px;padding:10px">No sessions yet.</p>';
+    return;
+  }
+  list.innerHTML = sessions.map(s => {
+    const taskShort = (s.task || '').substring(0, 40);
+    const doneEl    = s.done
+      ? `<div class="session-done ok">✓ done</div>`
+      : `<div class="session-done wip">● in progress</div>`;
+    return `
+      <div class="session-item" onclick="viewSession('${s.id}', this)">
+        <div class="session-id">${s.id}</div>
+        <div class="session-task" title="${escHtml(s.task || '')}">${escHtml(taskShort)}</div>
+        ${doneEl}
+      </div>`;
+  }).join('');
+}
+
+// ── Render: agents ────────────────────────────────────────────────────────────
+function renderAgents(agents) {
+  const pane = document.getElementById('pane-agents');
+  if (!agents || agents.length === 0) {
+    pane.innerHTML = '<p style="color:var(--dim);padding:8px">No sub-agents yet.</p>';
+    return;
+  }
+  pane.innerHTML = agents.map(a => {
+    const phase    = (a.status || {}).phase || '?';
+    const doneEl   = a.done
+      ? `<div class="agent-phase agent-done">✓ done</div>`
+      : `<div class="agent-phase agent-wip">● ${phase}</div>`;
+    return `
+      <div class="agent-card" onclick="viewAgentStream('${a.id}', this)">
+        <div class="agent-id">sub: ${a.id}</div>
+        <div class="agent-task">${escHtml((a.task || '').substring(0, 60))}</div>
+        ${doneEl}
+      </div>`;
+  }).join('');
+}
+
+// ── Prompt tab ────────────────────────────────────────────────────────────────
+let promptDirty = false;
+
+function buildPromptPane(content) {
+  const pane = document.getElementById('pane-prompt');
+  pane.style.display = 'flex';
+  pane.style.flexDirection = 'column';
+  pane.style.gap = '8px';
+  pane.style.padding = '10px';
+  pane.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+      <span style="font-size:11px;color:var(--dim)">Primordial system prompt</span>
+      <span id="prompt-status" style="font-size:10px;color:var(--dim)">saved</span>
+    </div>
+    <textarea id="prompt-textarea"
+      spellcheck="false"
+      style="flex:1;min-height:0;background:var(--bg);border:1px solid var(--border);
+             border-radius:6px;color:var(--text);font-family:inherit;font-size:11px;
+             line-height:1.5;padding:8px;resize:none;outline:none"
+    >${escHtml(content)}</textarea>
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      <button onclick="savePrompt()"
+        style="flex:1;padding:6px;border-radius:5px;border:none;
+               background:var(--accent);color:#000;font-family:inherit;
+               font-size:12px;font-weight:600;cursor:pointer">
+        Save
+      </button>
+      <button onclick="resetPrompt()"
+        style="padding:6px 10px;border-radius:5px;border:1px solid var(--border);
+               background:transparent;color:var(--dim);font-family:inherit;
+               font-size:12px;cursor:pointer"
+        title="Reset to built-in default (takes effect after agent restart)">
+        Reset
+      </button>
+    </div>
+    <p style="font-size:10px;color:var(--dim);flex-shrink:0">
+      Changes take effect on the <em>next</em> LLM call — no restart needed.
+    </p>`;
+
+  document.getElementById('prompt-textarea').addEventListener('input', () => {
+    promptDirty = true;
+    document.getElementById('prompt-status').textContent = '● unsaved';
+    document.getElementById('prompt-status').style.color = 'var(--amber)';
+  });
+}
+
+async function loadPrompt() {
+  try {
+    const r = await (await fetch('/prompt')).json();
+    if (document.getElementById('prompt-textarea')) {
+      // Already built, just update if not dirty
+      if (!promptDirty) {
+        document.getElementById('prompt-textarea').value = r.content;
+      }
+    } else {
+      buildPromptPane(r.content || '');
+    }
+  } catch(_) {}
+}
+
+async function savePrompt() {
+  const content = document.getElementById('prompt-textarea').value;
+  try {
+    const r = await (await fetch('/prompt', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ content })
+    })).json();
+    if (r.ok) {
+      promptDirty = false;
+      const s = document.getElementById('prompt-status');
+      s.textContent = '✓ saved';
+      s.style.color = 'var(--green)';
+      setTimeout(() => { s.textContent = 'saved'; s.style.color = 'var(--dim)'; }, 2000);
+    }
+  } catch(_) {}
+}
+
+async function resetPrompt() {
+  if (!confirm('Reset to built-in default prompt? Your edits will be lost.')) return;
+  try {
+    await fetch('/prompt/reset', { method: 'POST' });
+    promptDirty = false;
+    // Reload content
+    const r = await (await fetch('/prompt')).json();
+    const ta = document.getElementById('prompt-textarea');
+    if (ta) {
+      ta.value = r.content || '';
+      const s = document.getElementById('prompt-status');
+      s.textContent = 'reset to default';
+      s.style.color = 'var(--teal)';
+      setTimeout(() => { s.textContent = 'saved'; s.style.color = 'var(--dim)'; }, 2000);
+    }
+  } catch(_) {}
+}
+
+async function viewAgentStream(id, el) {
+  isLive = false;
+  if (sse) { sse.close(); sse = null; }
+  document.getElementById('stream').innerHTML = '';
+  document.getElementById('stream-title').textContent = `SUB-AGENT ${id}`;
+  document.getElementById('live-btn').classList.remove('viewing-live');
+
+  try {
+    const events = await (await fetch(`/agents/${id}/stream`)).json();
+    events.forEach(ev => {
+      const div = buildEventEl(ev);
+      document.getElementById('stream').appendChild(div);
+    });
+    const last = document.querySelector('#stream .ev:last-child');
+    if (last) last.scrollIntoView({ block: 'end' });
+  } catch(_) {
+    document.getElementById('stream').innerHTML = '<p style="color:var(--dim);padding:16px">No data.</p>';
+  }
+}
+
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    const names = ['tools','memory','agents','prompt'];
+    b.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(p => {
+    p.classList.toggle('active', p.id === `pane-${name}`);
+  });
+  if (name === 'prompt') loadPrompt();
+}
+
+// ── Send message ─────────────────────────────────────────────────────────────
+async function sendMsg() {
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  const endpoint = agentPhase === 'idle' ? '/task' : '/steer';
+  const body     = agentPhase === 'idle' ? { task: text } : { message: text };
+  try {
+    await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  } catch(e) {
+    console.error('Send failed:', e);
+  }
+}
+
+async function sendAbort() {
+  const msg = prompt('Abort current task. New goal (optional):');
+  if (msg === null) return; // user cancelled
+  try {
+    await fetch('/abort', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message: msg || 'Abort' }) });
+  } catch(e) {}
+}
+
+async function togglePause() {
+  const endpoint = isPaused ? '/resume' : '/pause';
+  try { await fetch(endpoint, { method:'POST' }); }
+  catch(_) {}
+}
+
+// ── Keyboard shortcut ─────────────────────────────────────────────────────────
+document.getElementById('msg-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) sendMsg();
+});
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+connectSSE();
+pollState();
+pollSessions();
+pollAgents();
+setInterval(pollState,    3000);
+setInterval(pollSessions, 5000);
+setInterval(pollAgents,   5000);
+</script>
+</body>
+</html>

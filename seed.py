@@ -57,7 +57,10 @@ for _d in [TOOLS_DIR, MEMORY_DIR / "sessions", STATE_DIR, SANDBOX_DIR, AGENTS_DI
     _d.mkdir(parents=True, exist_ok=True)
 
 REGISTRY   = TOOLS_DIR / "__registry__.json"
-SEMANTIC   = MEMORY_DIR / "semantic.md"
+SEMANTIC   = MEMORY_DIR / "semantic.md"   # legacy — migrated to RAM on first run
+RAM_FILE   = MEMORY_DIR / "ram.md"        # always loaded, kept short
+ROM_DIR    = MEMORY_DIR / "rom"           # retrieved on relevance, never fully loaded
+ROM_DIR.mkdir(parents=True, exist_ok=True)
 PAUSE_FLAG = STATE_DIR / "pause"
 INBOX      = STATE_DIR / "inbox.json"
 STATUS     = STATE_DIR / "status.json"
@@ -285,16 +288,95 @@ def exec_safe(code: str, timeout: int = 30) -> dict:
         shutil.rmtree(run_dir, ignore_errors=True)
 
 
-# ─── Memory ────────────────────────────────────────────────────────────────────
-def read_semantic() -> str:
-    return SEMANTIC.read_text(encoding="utf-8") if SEMANTIC.exists() else "(empty — no lessons yet)"
+# ─── Memory — two-tier ─────────────────────────────────────────────────────────
+#
+#  RAM (ram.md)   : Always injected into context. Short — max ~20 bullet points.
+#                   Universal lessons that apply to almost any task.
+#
+#  ROM (rom/*.md) : Never fully loaded. Retrieved by keyword overlap with the
+#                   current task. Each file has a YAML front-matter with tags.
+#                   Domain/situation-specific knowledge lives here.
+#
+#  On first run: legacy semantic.md is migrated to RAM automatically.
+
+def _migrate_semantic():
+    """One-time migration: move old semantic.md into RAM."""
+    if SEMANTIC.exists() and not RAM_FILE.exists():
+        RAM_FILE.write_text(SEMANTIC.read_text(encoding="utf-8"), encoding="utf-8")
+        SEMANTIC.rename(SEMANTIC.with_suffix(".md.bak"))
+        write_log("memory_migrate", "Migrated semantic.md → ram.md")
 
 
-def add_to_memory(content: str):
+def read_ram() -> str:
+    return RAM_FILE.read_text(encoding="utf-8") if RAM_FILE.exists() else "(empty)"
+
+
+def _ram_item_count() -> int:
+    if not RAM_FILE.exists():
+        return 0
+    return sum(1 for l in RAM_FILE.read_text(encoding="utf-8").splitlines() if l.strip().startswith("-"))
+
+
+def add_to_ram(content: str):
+    """Append a lesson to RAM. Agent is responsible for keeping it concise."""
     ts = datetime.now().strftime("%Y-%m-%d")
-    with open(SEMANTIC, "a", encoding="utf-8") as f:
-        f.write(f"\n### {ts}\n{content}\n")
-    write_log("memory_write", content[:120])
+    with open(RAM_FILE, "a", encoding="utf-8") as f:
+        f.write(f"\n- [{ts}] {content.strip()}\n")
+    write_log("memory_ram", f"RAM ← {content[:100]}")
+
+
+def add_to_rom(content: str, tags: list[str]):
+    """Store a lesson in ROM with searchable tags."""
+    slug = re.sub(r"[^a-z0-9]+", "_", tags[0].lower())[:20] if tags else "misc"
+    existing = list(ROM_DIR.glob(f"{slug}*.md"))
+    fname = f"{slug}_{len(existing):03d}.md"
+    path = ROM_DIR / fname
+    ts = datetime.now().strftime("%Y-%m-%d")
+    tag_str = ", ".join(tags)
+    path.write_text(f"---\ntags: {tag_str}\ncreated: {ts}\n---\n{content.strip()}\n", encoding="utf-8")
+    write_log("memory_rom", f"ROM[{tag_str}] ← {content[:100]}")
+
+
+def retrieve_rom(task: str, top_k: int = 5) -> str:
+    """Return top-k ROM entries relevant to the task by keyword overlap."""
+    if not ROM_DIR.exists():
+        return ""
+    task_words = set(re.findall(r"\w+", task.lower())) - {"the","a","an","to","of","and","or","is","in","it","for","with","on","at","i","my","me"}
+    if not task_words:
+        return ""
+
+    scored: list[tuple[int, str, str]] = []
+    for f in ROM_DIR.glob("*.md"):
+        try:
+            raw = f.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        # Parse front-matter
+        tags_words: set[str] = set()
+        body = raw
+        if raw.startswith("---"):
+            end = raw.find("---", 3)
+            if end > 0:
+                fm = raw[3:end]
+                m = re.search(r"tags:\s*(.+)", fm)
+                if m:
+                    tags_words = set(re.findall(r"\w+", m.group(1).lower()))
+                body = raw[end + 3:].strip()
+        # Also score against body words (lower weight)
+        body_words = set(re.findall(r"\w+", body.lower()))
+        score = len(task_words & tags_words) * 3 + len(task_words & body_words)
+        if score > 0:
+            scored.append((score, f.stem, body[:600]))
+
+    scored.sort(reverse=True)
+    if not scored:
+        return ""
+    return "\n\n".join(f"[ROM:{stem}]\n{body}" for _, stem, body in scored[:top_k])
+
+
+# Backward-compat shim used by old reflect() code — routes to RAM
+def add_to_memory(content: str):
+    add_to_ram(content)
 
 
 # ─── Sub-agents ────────────────────────────────────────────────────────────────
@@ -393,10 +475,12 @@ spawn_sub — spawn a sub-agent for a parallel subtask
 collect_sub — wait for sub-agent to finish and get its result
 {"thinking":"…","action":"collect_sub","agent_id":"the_id"}
 
-remember — append a reusable lesson to memory/semantic.md
-{"thinking":"…","action":"remember","content":"the lesson"}
-  • Write general truths, not task-specific notes
-  • Examples: "requests needs timeout=10 on Windows", "tool X fails on UNC paths"
+remember — store a lesson in RAM (always loaded) or ROM (retrieved by relevance)
+{"thinking":"…","action":"remember","tier":"ram","content":"one concise universal lesson"}
+{"thinking":"…","action":"remember","tier":"rom","content":"detailed lesson","tags":["domain","topic","keywords"]}
+  • RAM: universal rules applying to almost every task. Keep RAM short — max 20 items total.
+  • ROM: domain/situation-specific knowledge. Use descriptive tags (e.g. ["flights","skyscanner","api"]).
+  • When in doubt, use ROM. RAM is precious context space.
 
 done — signal task completion
 {"thinking":"…","action":"done","result":"description of what was achieved"}
@@ -411,15 +495,30 @@ done — signal task completion
 7. Human messages marked [Human] in context are high-priority steering — adjust immediately
 8. Spawn sub-agents for genuinely parallel work; collect results before signalling done"""
 
-REFLECT_SYSTEM = """You are reviewing a completed task session to extract reusable lessons.
+REFLECT_SYSTEM = """You are reviewing a completed task session. Extract lessons and classify them into two tiers:
+
+RAM — always in context, must stay short (max 20 items total across all sessions).
+  Use for: universal rules that apply to almost any task, critical Windows quirks, agent behaviour rules.
+  Keep each item to one concise sentence.
+
+ROM — retrieved by keyword when relevant, can be large.
+  Use for: domain-specific knowledge, situation-specific patterns, tool usage details for specific APIs.
+  Include descriptive tags so they surface when relevant.
 
 Return ONLY this JSON (no other text):
 {
-  "lessons": ["concise reusable lesson", "…"],
+  "ram_lessons": ["one universal lesson", "…"],
+  "rom_lessons": [
+    {"content": "detailed situation-specific lesson", "tags": ["domain", "topic", "keywords"]}
+  ],
   "tool_improvements": [{"name":"tool_name","issue":"what went wrong","fix":"how to improve it"}]
 }
 
-Focus on: Windows-specific quirks, reusable patterns discovered, tool failure root causes, parallelism opportunities missed, anything that would help future tasks start faster."""
+Rules:
+- ram_lessons should be empty unless the lesson truly applies to almost every future task
+- ROM is the right place for anything domain-specific (flights, email, polymarket, web scraping…)
+- If RAM already has 20 items, route new universal lessons to ROM with tag "general"
+- Keep ram_lessons to 1-3 items per session maximum"""
 
 # Write default prompt to file as soon as the module loads so the web UI
 # can display it even before seed.py has fully started.
@@ -435,13 +534,17 @@ MAX_MESSAGES = 30
 def run_task(task: str, session_dir: Path) -> str:
     write_log("task_start", task)
 
+    rom_hits = retrieve_rom(task)
     initial = (
-        f"## Accumulated knowledge\n{read_semantic()}\n\n"
-        f"## Available tools\n{registry_summary()}\n\n"
+        f"## RAM — core knowledge (always available)\n{read_ram()}\n\n"
+        + (f"## ROM — retrieved memories (relevant to this task)\n{rom_hits}\n\n" if rom_hits else "")
+        + f"## Available tools\n{registry_summary()}\n\n"
         f"## Task\n{task}\n\n"
         "Review existing tools and knowledge before acting. "
         "Test code with exec before writing tools."
     )
+    if rom_hits:
+        write_log("memory_retrieve", f"Injected {len(rom_hits.split('[ROM:'))-1} ROM entries")
     messages = [{"role": "user", "content": initial}]
 
     for step in range(MAX_STEPS):
@@ -500,8 +603,14 @@ def run_task(task: str, session_dir: Path) -> str:
             result = collect_sub(action.get("agent_id", ""))
 
         elif act == "remember":
-            add_to_memory(action.get("content", ""))
-            result = {"ok": True}
+            tier = action.get("tier", "ram")
+            content = action.get("content", "")
+            if tier == "rom":
+                tags = action.get("tags", ["general"])
+                add_to_rom(content, tags)
+            else:
+                add_to_ram(content)
+            result = {"ok": True, "tier": tier}
 
         elif act == "think":
             result = {"ok": "continue"}
@@ -534,23 +643,35 @@ def reflect(session_dir: Path):
     if not sf.exists():
         return
     lines = sf.read_text(encoding="utf-8").splitlines()[-80:]
+    ram_count = _ram_item_count()
     try:
         raw = _llm.call(
             REFLECT_SYSTEM,
             [{"role": "user", "content":
                 f"Session log (last 80 events):\n{chr(10).join(lines)}\n\n"
-                f"Current semantic memory:\n{read_semantic()[:800]}"}],
+                f"Current RAM ({ram_count}/20 items):\n{read_ram()[:600]}"}],
         )
         r = parse_action(raw)
-        lessons = r.get("lessons", [])
-        if lessons:
-            add_to_memory("### Session lessons\n" + "\n".join(f"- {l}" for l in lessons))
+
+        # RAM lessons — universal, short
+        for lesson in r.get("ram_lessons", []):
+            add_to_ram(lesson)
+
+        # ROM lessons — specific, tagged
+        for entry in r.get("rom_lessons", []):
+            add_to_rom(entry.get("content", ""), entry.get("tags", ["general"]))
+
+        # Tool improvement notes
         for imp in r.get("tool_improvements", []):
             reg = get_registry()
             if imp.get("name") in reg:
                 reg[imp["name"]]["improvement_note"] = imp.get("fix", "")
                 save_registry(reg)
-        write_log("reflect_done", f"{len(lessons)} lessons, {len(r.get('tool_improvements',[]))} tool notes")
+
+        n_ram = len(r.get("ram_lessons", []))
+        n_rom = len(r.get("rom_lessons", []))
+        write_log("reflect_done",
+                  f"{n_ram} RAM lessons, {n_rom} ROM lessons, {len(r.get('tool_improvements',[]))} tool notes")
     except Exception as e:
         write_log("reflect_error", str(e))
 
@@ -560,6 +681,7 @@ def main():
     sessions_dir = MEMORY_DIR / "sessions"
     n = len(list(sessions_dir.iterdir())) if sessions_dir.exists() else 0
     set_status(phase="idle", sessions=n, pid=os.getpid())
+    _migrate_semantic()
     write_log("agent_start", f"Agent ready. {n} past sessions. Post a task via the web UI.")
 
     while True:

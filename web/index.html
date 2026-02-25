@@ -552,7 +552,22 @@
       <button class="tab-btn"        onclick="showTab('prompt')">Prompt</button>
     </div>
     <div id="pane-tools"  class="tab-pane active"><p style="color:var(--dim);padding:8px">No tools yet.</p></div>
-    <div id="pane-memory" class="tab-pane"><pre id="memory-content">No knowledge accumulated yet.</pre></div>
+    <div id="pane-memory" class="tab-pane">
+      <div style="margin-bottom:6px">
+        <span style="font-size:10px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.5px">RAM</span>
+        <span id="ram-count" style="font-size:10px;color:var(--dim);margin-left:6px"></span>
+        <span style="font-size:10px;color:var(--dim);float:right">always in context</span>
+      </div>
+      <pre id="ram-content" style="font-size:11px;line-height:1.6;color:var(--dim);white-space:pre-wrap;word-break:break-word;margin-bottom:14px">—</pre>
+      <div style="margin-bottom:6px;display:flex;align-items:center;gap:8px">
+        <span style="font-size:10px;font-weight:600;color:var(--violet);text-transform:uppercase;letter-spacing:.5px">ROM</span>
+        <span id="rom-count" style="font-size:10px;color:var(--dim)"></span>
+        <input id="rom-search" type="text" placeholder="filter by tag…"
+          style="margin-left:auto;background:var(--bg);border:1px solid var(--border);border-radius:4px;
+                 color:var(--text);font-family:inherit;font-size:10px;padding:2px 6px;outline:none;width:90px">
+      </div>
+      <div id="rom-list"></div>
+    </div>
     <div id="pane-agents" class="tab-pane"><p style="color:var(--dim);padding:8px">No sub-agents yet.</p></div>
     <div id="pane-prompt" class="tab-pane"></div>
   </aside>
@@ -780,7 +795,8 @@ async function pollState() {
     const s = await (await fetch(`/state?instance=${currentInstance}`)).json();
     updateHeader(s.status, s.paused);
     renderTools(s.tools);
-    renderMemory(s.memory);
+    window._lastRom = s.rom || [];
+    renderMemory(s.ram, s.rom);
     isPaused = s.paused;
     document.getElementById('pause-btn').textContent = s.paused ? 'Resume' : 'Pause';
     document.getElementById('pause-btn').classList.toggle('active', s.paused);
@@ -854,10 +870,43 @@ function renderTools(tools) {
 }
 
 // ── Render: memory ────────────────────────────────────────────────────────────
-function renderMemory(text) {
-  const el = document.getElementById('memory-content');
-  el.textContent = text || 'No knowledge accumulated yet.';
+function renderMemory(ram, rom) {
+  // RAM
+  const ramLines = (ram || '').trim().split('\n').filter(l => l.trim().startsWith('-'));
+  document.getElementById('ram-content').textContent = ramLines.length
+    ? ramLines.join('\n')
+    : '(empty — no universal lessons yet)';
+  document.getElementById('ram-count').textContent = `${ramLines.length}/20 items`;
+
+  // ROM
+  document.getElementById('rom-count').textContent = `${(rom || []).length} entries`;
+  renderRom(rom || []);
 }
+
+function renderRom(entries) {
+  const filter = (document.getElementById('rom-search').value || '').toLowerCase();
+  const list = document.getElementById('rom-list');
+  const visible = filter
+    ? entries.filter(e => e.tags.some(t => t.toLowerCase().includes(filter)) || e.content.toLowerCase().includes(filter))
+    : entries;
+  if (!visible.length) {
+    list.innerHTML = `<p style="color:var(--dim);font-size:11px">${filter ? 'No matches.' : '(empty — no specific lessons yet)'}</p>`;
+    return;
+  }
+  list.innerHTML = visible.map(e => `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:7px 9px;margin-bottom:6px">
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">
+        ${e.tags.map(t => `<span style="background:#2d1f47;color:var(--violet);font-size:9px;padding:1px 5px;border-radius:8px">${escHtml(t)}</span>`).join('')}
+        <span style="color:var(--dim);font-size:9px;margin-left:auto">${e.id}</span>
+      </div>
+      <div style="font-size:11px;color:var(--dim);line-height:1.5">${escHtml(e.content)}</div>
+    </div>`).join('');
+}
+
+document.getElementById('rom-search').addEventListener('input', function() {
+  // Re-render with current filter using last fetched data
+  if (window._lastRom) renderRom(window._lastRom);
+});
 
 // ── Render: sessions ──────────────────────────────────────────────────────────
 function renderSessions(sessions) {

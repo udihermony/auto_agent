@@ -9,6 +9,7 @@ Then open http://localhost:8000
 """
 
 import json, asyncio, shutil, subprocess, sys, re, ctypes
+from glob import glob
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -202,15 +203,42 @@ async def stream_events(request: Request, instance: str = "default"):
 
 
 # ─── State snapshot ────────────────────────────────────────────────────────────
+def read_rom_entries(ir: Path) -> list:
+    """Parse all ROM .md files into a list of {id, tags, content}."""
+    rom_dir = ir / "memory" / "rom"
+    if not rom_dir.exists():
+        return []
+    entries = []
+    for f in sorted(rom_dir.glob("*.md")):
+        try:
+            raw = f.read_text(encoding="utf-8")
+            tags, body = [], raw
+            if raw.startswith("---"):
+                end = raw.find("---", 3)
+                if end > 0:
+                    m = re.search(r"tags:\s*(.+)", raw[3:end])
+                    if m:
+                        tags = [t.strip() for t in m.group(1).split(",")]
+                    body = raw[end + 3:].strip()
+            entries.append({"id": f.stem, "tags": tags, "content": body[:400]})
+        except Exception:
+            pass
+    return entries
+
+
 @app.get("/state")
 async def get_state(instance: str = "default"):
     ir = instance_root(instance)
+    ram_file = ir / "memory" / "ram.md"
+    # Fallback: old semantic.md
+    if not ram_file.exists():
+        ram_file = ir / "memory" / "semantic.md"
     return {
-        "status":  rj(ir / "state"  / "status.json", {}),
-        "tools":   rj(ir / "tools"  / "__registry__.json", {}),
-        "memory":  (ir / "memory" / "semantic.md").read_text(encoding="utf-8")
-                   if (ir / "memory" / "semantic.md").exists() else "",
-        "paused":  (ir / "state" / "pause").exists(),
+        "status": rj(ir / "state" / "status.json", {}),
+        "tools":  rj(ir / "tools" / "__registry__.json", {}),
+        "ram":    ram_file.read_text(encoding="utf-8") if ram_file.exists() else "",
+        "rom":    read_rom_entries(ir),
+        "paused": (ir / "state" / "pause").exists(),
     }
 
 

@@ -475,6 +475,12 @@ spawn_sub — spawn a sub-agent for a parallel subtask
 collect_sub — wait for sub-agent to finish and get its result
 {"thinking":"…","action":"collect_sub","agent_id":"the_id"}
 
+search_rom — search long-term memory for relevant past knowledge
+{"thinking":"…","action":"search_rom","query":"keywords describing what you're looking for"}
+  • Call this AFTER planning and BEFORE starting work on the task
+  • Use specific keywords related to the domain (e.g. "polymarket trading api", "gmail imap search")
+  • Returns matching ROM entries; decide which are useful and keep them in mind for execution
+
 remember — store a lesson in RAM (always loaded) or ROM (retrieved by relevance)
 {"thinking":"…","action":"remember","tier":"ram","content":"one concise universal lesson"}
 {"thinking":"…","action":"remember","tier":"rom","content":"detailed lesson","tags":["domain","topic","keywords"]}
@@ -485,8 +491,15 @@ remember — store a lesson in RAM (always loaded) or ROM (retrieved by relevanc
 done — signal task completion
 {"thinking":"…","action":"done","result":"description of what was achieved"}
 
+## Task execution protocol
+1. Plan — think through the approach before acting
+2. search_rom — search for relevant past knowledge using domain keywords
+3. Check tools — reuse existing tools before writing new ones
+4. Execute — use exec to test, write_tool to make permanent
+5. done — signal completion
+
 ## Rules
-1. At task start, review the memory/semantic.md section in context — it has hard-won lessons
+1. Always follow the task execution protocol: plan → search_rom → check tools → execute
 2. Check the tools list — reuse before rewriting
 3. exec to test logic → write_tool to make it permanent
 4. run(**kwargs) must return a JSON-serialisable value (not None for output tools)
@@ -534,17 +547,13 @@ MAX_MESSAGES = 30
 def run_task(task: str, session_dir: Path) -> str:
     write_log("task_start", task)
 
-    rom_hits = retrieve_rom(task)
     initial = (
         f"## RAM — core knowledge (always available)\n{read_ram()}\n\n"
-        + (f"## ROM — retrieved memories (relevant to this task)\n{rom_hits}\n\n" if rom_hits else "")
-        + f"## Available tools\n{registry_summary()}\n\n"
+        f"## Available tools\n{registry_summary()}\n\n"
         f"## Task\n{task}\n\n"
-        "Review existing tools and knowledge before acting. "
-        "Test code with exec before writing tools."
+        "Follow the task execution protocol: plan your approach, then search_rom for relevant "
+        "past knowledge before acting. Test code with exec before writing tools."
     )
-    if rom_hits:
-        write_log("memory_retrieve", f"Injected {len(rom_hits.split('[ROM:'))-1} ROM entries")
     messages = [{"role": "user", "content": initial}]
 
     for step in range(MAX_STEPS):
@@ -602,6 +611,13 @@ def run_task(task: str, session_dir: Path) -> str:
         elif act == "collect_sub":
             result = collect_sub(action.get("agent_id", ""))
 
+        elif act == "search_rom":
+            query = action.get("query", task)
+            hits = retrieve_rom(query)
+            count = len(hits.split("[ROM:")) - 1 if hits else 0
+            write_log("memory_retrieve", f"ROM search: '{query[:60]}' → {count} entries found")
+            result = {"hits": hits or "(no relevant ROM entries found)", "count": count}
+
         elif act == "remember":
             tier = action.get("tier", "ram")
             content = action.get("content", "")
@@ -626,7 +642,7 @@ def run_task(task: str, session_dir: Path) -> str:
 
         else:
             write_log("unknown_action", f"Unknown action: {act!r}")
-            result = {"error": f"Unknown action '{act}'. Valid: exec, write_tool, use_tool, spawn_sub, collect_sub, remember, done"}
+            result = {"error": f"Unknown action '{act}'. Valid: exec, write_tool, use_tool, spawn_sub, collect_sub, search_rom, remember, done"}
 
         messages.append({"role": "assistant", "content": raw})
         messages.append({"role": "user", "content": f"result: {json.dumps(result, default=str)[:1500]}"})

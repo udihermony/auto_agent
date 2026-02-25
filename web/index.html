@@ -583,6 +583,43 @@
   <button id="send-btn"  onclick="sendMsg()">Send</button>
 </footer>
 
+<!-- New Agent Modal -->
+<div id="modal-overlay">
+  <div id="modal">
+    <h3>New Agent</h3>
+
+    <div class="modal-field">
+      <label>Name (lowercase, no spaces)</label>
+      <input id="modal-name" type="text" placeholder="e.g. researcher" maxlength="32"
+             onkeydown="if(event.key==='Enter') createAgent()">
+    </div>
+
+    <div class="modal-check">
+      <label class="modal-check-item">
+        <input type="checkbox" id="carry-tools">
+        <div>
+          <div class="label">Carry over tools</div>
+          <div class="sublabel">Copy all registered tools to the new agent</div>
+        </div>
+      </label>
+      <label class="modal-check-item">
+        <input type="checkbox" id="carry-memory">
+        <div>
+          <div class="label">Carry over memory</div>
+          <div class="sublabel">Copy accumulated semantic knowledge</div>
+        </div>
+      </label>
+    </div>
+
+    <div id="modal-error"></div>
+
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeModal()">Cancel</button>
+      <button class="modal-btn primary" onclick="createAgent()">Create &amp; Start</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
 let agentPhase      = 'idle';
@@ -1206,43 +1243,6 @@ setInterval(pollSessions,  5000);
 setInterval(pollAgents,    5000);
 setInterval(pollInstances, 6000);
 </script>
-
-<!-- New Agent Modal -->
-<div id="modal-overlay">
-  <div id="modal">
-    <h3>New Agent</h3>
-
-    <div class="modal-field">
-      <label>Name (lowercase, no spaces)</label>
-      <input id="modal-name" type="text" placeholder="e.g. researcher" maxlength="32"
-             onkeydown="if(event.key==='Enter') createAgent()">
-    </div>
-
-    <div class="modal-check">
-      <label class="modal-check-item">
-        <input type="checkbox" id="carry-tools">
-        <div>
-          <div class="label">Carry over tools</div>
-          <div class="sublabel">Copy all registered tools to the new agent</div>
-        </div>
-      </label>
-      <label class="modal-check-item">
-        <input type="checkbox" id="carry-memory">
-        <div>
-          <div class="label">Carry over memory</div>
-          <div class="sublabel">Copy accumulated semantic knowledge</div>
-        </div>
-      </label>
-    </div>
-
-    <div id="modal-error"></div>
-
-    <div class="modal-actions">
-      <button class="modal-btn" onclick="closeModal()">Cancel</button>
-      <button class="modal-btn primary" onclick="createAgent()">Create &amp; Start</button>
-    </div>
-  </div>
-</div>
 
 </body>
 </html>

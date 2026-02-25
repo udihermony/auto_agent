@@ -412,17 +412,38 @@ def collect_sub(agent_id: str, timeout: int = 300) -> dict:
 # ─── Response parser ───────────────────────────────────────────────────────────
 def parse_action(text: str) -> dict:
     t = text.strip()
+    # 1. Code block
     m = re.search(r"```(?:json)?\s*([\s\S]*?)```", t)
     if m:
-        t = m.group(1).strip()
+        try:
+            return json.loads(m.group(1).strip())
+        except Exception:
+            pass
+    # 2. Whole text
     try:
         return json.loads(t)
     except Exception:
         pass
-    m = re.search(r"\{[\s\S]*\}", t)
-    if m:
+    # 3. Scan right-to-left: find the last { that opens a valid JSON object
+    #    with an 'action' key, handling nested braces correctly.
+    for start in range(len(t) - 1, -1, -1):
+        if t[start] != '{':
+            continue
+        depth, end = 0, -1
+        for i, c in enumerate(t[start:]):
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    end = start + i
+                    break
+        if end == -1:
+            continue
         try:
-            return json.loads(m.group())
+            obj = json.loads(t[start:end + 1])
+            if isinstance(obj, dict) and 'action' in obj:
+                return obj
         except Exception:
             pass
     return {"thinking": text, "action": "think", "content": text}
@@ -575,8 +596,13 @@ def run_task(task: str, session_dir: Path) -> str:
         try:
             raw = _llm.call(get_agent_prompt(), messages)
         except Exception as e:
-            write_log("llm_error", str(e))
-            time.sleep(5)
+            err_str = str(e)
+            write_log("llm_error", err_str)
+            if "rate_limit" in err_str or "429" in err_str:
+                write_log("llm_error", "Rate limited — waiting 60s before retry…")
+                time.sleep(60)
+            else:
+                time.sleep(5)
             continue
 
         action = parse_action(raw)

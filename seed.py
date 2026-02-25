@@ -18,7 +18,18 @@ from pathlib import Path
 from datetime import datetime
 
 # ─── Project paths ─────────────────────────────────────────────────────────────
-ROOT        = Path(__file__).parent.resolve()
+SEED_FILE = Path(__file__).resolve()   # always points to seed.py itself
+
+def _resolve_root() -> Path:
+    """Support --root PATH so multiple agent instances can share one seed.py."""
+    args = sys.argv[1:]
+    if "--root" in args:
+        idx = args.index("--root")
+        if idx + 1 < len(args):
+            return Path(args[idx + 1]).resolve()
+    return SEED_FILE.parent
+
+ROOT = _resolve_root()
 
 # ─── Load .env file (if present) ───────────────────────────────────────────────
 def _load_env():
@@ -293,10 +304,10 @@ def spawn_sub(task: str, agent_id: str) -> str:
     (d / "task.json").write_text(json.dumps({"task": task}), encoding="utf-8")
     (d / "status.json").write_text(json.dumps({"phase": "starting"}), encoding="utf-8")
     subprocess.Popen(
-        [sys.executable, str(ROOT / "seed.py"), "--sub", agent_id],
+        [sys.executable, str(SEED_FILE), "--sub", agent_id, "--root", str(ROOT)],
         stdout=open(d / "stdout.log", "w"),
         stderr=open(d / "stderr.log", "w"),
-        cwd=str(ROOT),
+        cwd=str(SEED_FILE.parent),
     )
     write_log("spawn_sub", f"Sub-agent {agent_id}: {task[:80]}", agent_id=agent_id)
     return agent_id

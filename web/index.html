@@ -86,6 +86,112 @@
   #pause-btn:hover { background: var(--border); }
   #pause-btn.active { background: var(--orange); border-color: var(--orange); color: #000; }
 
+  /* ── Instance switcher ── */
+  #instance-select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 3px 8px;
+    cursor: pointer;
+    outline: none;
+    max-width: 120px;
+  }
+  #instance-select:focus { border-color: var(--accent); }
+
+  #new-agent-btn {
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--teal);
+    background: transparent;
+    color: var(--teal);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  #new-agent-btn:hover { background: #1a3a1a; }
+
+  /* ── Modal ── */
+  #modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  #modal-overlay.open { display: flex; }
+
+  #modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  #modal h3 { font-size: 15px; color: var(--text); margin: 0; }
+
+  .modal-field { display: flex; flex-direction: column; gap: 5px; }
+  .modal-field label { font-size: 11px; color: var(--dim); }
+  .modal-field input[type=text] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 7px 10px;
+    outline: none;
+  }
+  .modal-field input[type=text]:focus { border-color: var(--accent); }
+
+  .modal-check {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .modal-check-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .modal-check-item:hover { border-color: var(--accent); background: #161b22; }
+  .modal-check-item input { margin-top: 2px; cursor: pointer; }
+  .modal-check-item .label  { font-size: 12px; color: var(--text); }
+  .modal-check-item .sublabel { font-size: 10px; color: var(--dim); margin-top: 2px; }
+
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal-btn {
+    padding: 7px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--dim);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .modal-btn:hover { background: var(--border); }
+  .modal-btn.primary {
+    background: var(--teal);
+    border-color: var(--teal);
+    color: #000;
+    font-weight: 600;
+  }
+  .modal-btn.primary:hover { opacity: 0.85; }
+  #modal-error { font-size: 11px; color: var(--red); min-height: 14px; }
+
   /* ── Main layout ── */
   #main {
     display: grid;
@@ -405,6 +511,8 @@
   <span id="phase-badge" class="phase-starting">starting</span>
   <span id="task-label"><span id="task-text">—</span></span>
   <span id="header-meta">sessions: <b id="session-count">0</b></span>
+  <select id="instance-select" onchange="switchInstance(this.value)" title="Active agent instance"></select>
+  <button id="new-agent-btn" onclick="openModal()">+ New Agent</button>
   <button id="pause-btn" onclick="togglePause()">Pause</button>
 </header>
 
@@ -461,7 +569,8 @@
 
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
-let agentPhase   = 'idle';
+let agentPhase      = 'idle';
+let currentInstance = 'default';
 let isLive       = true;
 let followStream = true;
 let isPaused     = false;
@@ -481,7 +590,7 @@ const activeFilters = new Set(['thinking','exec','tool','memory','sub','meta']);
 let sse = null;
 function connectSSE() {
   if (sse) sse.close();
-  sse = new EventSource('/stream');
+  sse = new EventSource(`/stream?instance=${currentInstance}`);
   sse.onmessage = e => {
     try { appendEvent(JSON.parse(e.data)); }
     catch(_) {}
@@ -653,7 +762,7 @@ async function viewSession(id, el) {
   el.classList.add('active');
 
   try {
-    const events = await (await fetch(`/sessions/${id}/stream`)).json();
+    const events = await (await fetch(`/sessions/${id}/stream?instance=${currentInstance}`)).json();
     events.forEach(ev => {
       const div = buildEventEl(ev);
       document.getElementById('stream').appendChild(div);
@@ -668,7 +777,7 @@ async function viewSession(id, el) {
 // ── Status polling ───────────────────────────────────────────────────────────
 async function pollState() {
   try {
-    const s = await (await fetch('/state')).json();
+    const s = await (await fetch(`/state?instance=${currentInstance}`)).json();
     updateHeader(s.status, s.paused);
     renderTools(s.tools);
     renderMemory(s.memory);
@@ -680,14 +789,14 @@ async function pollState() {
 
 async function pollSessions() {
   try {
-    const sessions = await (await fetch('/sessions')).json();
+    const sessions = await (await fetch(`/sessions?instance=${currentInstance}`)).json();
     renderSessions(sessions);
   } catch(_) {}
 }
 
 async function pollAgents() {
   try {
-    const agents = await (await fetch('/agents')).json();
+    const agents = await (await fetch(`/agents?instance=${currentInstance}`)).json();
     renderAgents(agents);
   } catch(_) {}
 }
@@ -840,12 +949,9 @@ function buildPromptPane(content) {
 
 async function loadPrompt() {
   try {
-    const r = await (await fetch('/prompt')).json();
+    const r = await (await fetch(`/prompt?instance=${currentInstance}`)).json();
     if (document.getElementById('prompt-textarea')) {
-      // Already built, just update if not dirty
-      if (!promptDirty) {
-        document.getElementById('prompt-textarea').value = r.content;
-      }
+      if (!promptDirty) document.getElementById('prompt-textarea').value = r.content;
     } else {
       buildPromptPane(r.content || '');
     }
@@ -858,7 +964,7 @@ async function savePrompt() {
     const r = await (await fetch('/prompt', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ content })
+      body: JSON.stringify({ content, instance: currentInstance })
     })).json();
     if (r.ok) {
       promptDirty = false;
@@ -873,10 +979,13 @@ async function savePrompt() {
 async function resetPrompt() {
   if (!confirm('Reset to built-in default prompt? Your edits will be lost.')) return;
   try {
-    await fetch('/prompt/reset', { method: 'POST' });
+    await fetch('/prompt/reset', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ instance: currentInstance })
+    });
     promptDirty = false;
-    // Reload content
-    const r = await (await fetch('/prompt')).json();
+    const r = await (await fetch(`/prompt?instance=${currentInstance}`)).json();
     const ta = document.getElementById('prompt-textarea');
     if (ta) {
       ta.value = r.content || '';
@@ -896,7 +1005,7 @@ async function viewAgentStream(id, el) {
   document.getElementById('live-btn').classList.remove('viewing-live');
 
   try {
-    const events = await (await fetch(`/agents/${id}/stream`)).json();
+    const events = await (await fetch(`/agents/${id}/stream?instance=${currentInstance}`)).json();
     events.forEach(ev => {
       const div = buildEventEl(ev);
       document.getElementById('stream').appendChild(div);
@@ -928,7 +1037,9 @@ async function sendMsg() {
   input.value = '';
 
   const endpoint = agentPhase === 'idle' ? '/task' : '/steer';
-  const body     = agentPhase === 'idle' ? { task: text } : { message: text };
+  const body     = agentPhase === 'idle'
+    ? { task: text, instance: currentInstance }
+    : { message: text, instance: currentInstance };
   try {
     await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   } catch(e) {
@@ -938,17 +1049,97 @@ async function sendMsg() {
 
 async function sendAbort() {
   const msg = prompt('Abort current task. New goal (optional):');
-  if (msg === null) return; // user cancelled
+  if (msg === null) return;
   try {
-    await fetch('/abort', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message: msg || 'Abort' }) });
+    await fetch('/abort', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ message: msg || 'Abort', instance: currentInstance })
+    });
   } catch(e) {}
 }
 
 async function togglePause() {
   const endpoint = isPaused ? '/resume' : '/pause';
-  try { await fetch(endpoint, { method:'POST' }); }
-  catch(_) {}
+  try {
+    await fetch(endpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ instance: currentInstance })
+    });
+  } catch(_) {}
 }
+
+// ── Instance switcher ────────────────────────────────────────────────────────
+function switchInstance(iid) {
+  currentInstance = iid;
+  clearStream();
+  connectSSE();
+  promptDirty = false;
+  document.getElementById('pane-prompt').innerHTML = '';  // force reload on next tab click
+  pollState();
+  pollSessions();
+  pollAgents();
+}
+
+async function pollInstances() {
+  try {
+    const instances = await (await fetch('/instances')).json();
+    const sel = document.getElementById('instance-select');
+    const cur = sel.value || 'default';
+    sel.innerHTML = instances.map(i => {
+      const dot = i.running ? '●' : '○';
+      const label = i.id === 'default' ? 'default' : i.id;
+      return `<option value="${i.id}" ${i.id === cur ? 'selected' : ''}>${dot} ${label}</option>`;
+    }).join('');
+  } catch(_) {}
+}
+
+// ── New Agent Modal ──────────────────────────────────────────────────────────
+function openModal() {
+  document.getElementById('modal-name').value = '';
+  document.getElementById('carry-tools').checked = false;
+  document.getElementById('carry-memory').checked = false;
+  document.getElementById('modal-error').textContent = '';
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('modal-name').focus(), 50);
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+async function createAgent() {
+  const name        = document.getElementById('modal-name').value.trim().toLowerCase().replace(/\s+/g,'_');
+  const carryTools  = document.getElementById('carry-tools').checked;
+  const carryMemory = document.getElementById('carry-memory').checked;
+  const errEl       = document.getElementById('modal-error');
+
+  if (!name) { errEl.textContent = 'Please enter a name.'; return; }
+  if (name === 'default') { errEl.textContent = "Cannot use 'default' as a name."; return; }
+
+  errEl.textContent = 'Creating…';
+  try {
+    const r = await (await fetch('/instances', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name, carry_tools: carryTools, carry_memory: carryMemory })
+    })).json();
+
+    if (!r.ok) { errEl.textContent = r.error || 'Failed.'; return; }
+
+    closeModal();
+    await pollInstances();
+    // Switch to the new instance
+    document.getElementById('instance-select').value = r.id;
+    switchInstance(r.id);
+  } catch(e) {
+    errEl.textContent = 'Network error.';
+  }
+}
+
+// Close modal on overlay click
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
 
 // ── Keyboard shortcut ─────────────────────────────────────────────────────────
 document.getElementById('msg-input').addEventListener('keydown', e => {
@@ -960,9 +1151,49 @@ connectSSE();
 pollState();
 pollSessions();
 pollAgents();
+pollInstances();
 setInterval(pollState,    3000);
-setInterval(pollSessions, 5000);
-setInterval(pollAgents,   5000);
+setInterval(pollSessions,  5000);
+setInterval(pollAgents,    5000);
+setInterval(pollInstances, 6000);
 </script>
+
+<!-- New Agent Modal -->
+<div id="modal-overlay">
+  <div id="modal">
+    <h3>New Agent</h3>
+
+    <div class="modal-field">
+      <label>Name (lowercase, no spaces)</label>
+      <input id="modal-name" type="text" placeholder="e.g. researcher" maxlength="32"
+             onkeydown="if(event.key==='Enter') createAgent()">
+    </div>
+
+    <div class="modal-check">
+      <label class="modal-check-item">
+        <input type="checkbox" id="carry-tools">
+        <div>
+          <div class="label">Carry over tools</div>
+          <div class="sublabel">Copy all registered tools to the new agent</div>
+        </div>
+      </label>
+      <label class="modal-check-item">
+        <input type="checkbox" id="carry-memory">
+        <div>
+          <div class="label">Carry over memory</div>
+          <div class="sublabel">Copy accumulated semantic knowledge</div>
+        </div>
+      </label>
+    </div>
+
+    <div id="modal-error"></div>
+
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeModal()">Cancel</button>
+      <button class="modal-btn primary" onclick="createAgent()">Create &amp; Start</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
